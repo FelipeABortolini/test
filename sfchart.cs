@@ -891,13 +891,14 @@ namespace T.Wpf.Components.TrendChart
             //return new DateTime(1970, 1, 1, 0, 0, 0, 0, System.DateTimeKind.Utc).AddMilliseconds(javaTimeStamp);
         }
 
-        public object CreateJsObject()
+        public object CreateJsObject(int idx = -1)
         {
             string aux;
 
             object axisObj = TInterop.ExecuteJavaScriptBase(@"new Object()");
             //TInterop.ExecuteJavaScriptBase("$0.span = 2", axisObj);
-            //TInterop.ExecuteJavaScriptBase("$0.rowIndex = 0", axisObj);
+            if (idx >= 0)
+                TInterop.ExecuteJavaScriptBase("$0.rowIndex = $1", axisObj, idx);
 
             TInterop.ExecuteJavaScriptBase("$0.visible = false", axisObj);
             if (this.IsVisible)
@@ -1868,6 +1869,22 @@ namespace T.Wpf.Components.TrendChart
             set { this.showRefreshButton = value; }
         }
 
+        private bool needsRecreateChartForStackPens = false;
+
+        public bool NeedsRecreateChartForStackPens
+        {
+            get { return this.needsRecreateChartForStackPens; }
+            set { this.needsRecreateChartForStackPens = value; }
+        }
+
+        private int expectedPensCount = 0;
+
+        public int ExpectedPensCount
+        {
+            get { return this.expectedPensCount; }
+            set { this.expectedPensCount = value; }
+        }
+
         private bool yLabelsEditable = true;
 
         public bool YLabelsEditable
@@ -2157,6 +2174,7 @@ namespace T.Wpf.Components.TrendChart
         public bool DisableOutputSubYDivisions
         {
             get { return this.disableOutputSubYDivisions; }
+            set { this.disableOutputSubYDivisions = value; }
         }
 
         private bool disableOutputSubXDivisions = false;
@@ -2934,6 +2952,18 @@ namespace T.Wpf.Components.TrendChart
         private double legendWidth = double.NaN;
         private double legendHeight = double.NaN;
 
+        private bool isStackPensMode = false;
+        private bool previousIsStackPensMode = false;
+
+        public bool IsStackPensMode
+        {
+            get { return this.isStackPensMode; }
+            set
+            {
+                this.isStackPensMode = value;
+            }
+        }
+
         public enum TypeChart
         {
             TrendChart,
@@ -3054,7 +3084,19 @@ namespace T.Wpf.Components.TrendChart
          public void CreateChart()
         {
             try
-            {             
+            {
+                bool stackPensModeChanged = this.previousIsStackPensMode != this.isStackPensMode;
+
+                int visiblePensCount = 0;
+                for (int i = 0; i < this.GetPenCount(); i++)
+                {
+                    if (this.pens[i].Visibility == Visibility.Visible)
+                        visiblePensCount++;
+                }
+
+                if (stackPensModeChanged && this.chart != null)
+                    this.DestroyChart();
+
                 bool chartDontExist = this.chart == null;
                 double opacityToApply = this.initializationLoops < 3 ? 0.0 : 1.0;
                 this.Opacity = opacityToApply;
@@ -3076,17 +3118,35 @@ namespace T.Wpf.Components.TrendChart
                         }
                         this.chartControlId = TConvert.ToString(TInterop.ExecuteJavaScriptBase("$0.id ", div));
 
+                        int pensCountForRows = this.needsRecreateChartForStackPens && this.expectedPensCount > 0
+                            ? this.expectedPensCount
+                            : visiblePensCount;
+
+                        object rowsArray;
+                        if (this.IsStackPensMode && pensCountForRows > 0)
+                        {
+                            rowsArray = TInterop.ExecuteJavaScriptBase(@"[]");
+                            double heightPerPen = 100.0 / pensCountForRows;
+                            string heightString = heightPerPen.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+                            for (int i = 0; i < pensCountForRows; i++)
+                            {
+                                object rowObj = TInterop.ExecuteJavaScriptBase(@"new Object()");
+                                TInterop.ExecuteJavaScriptBase("$0.height = $1", rowObj, heightString);
+                                TInterop.ExecuteJavaScriptBase("$0.push($1)", rowsArray, rowObj);
+                            }
+                        }
+                        else
+                            rowsArray = TInterop.ExecuteJavaScriptBase(@"[{height:'100%'}]");
+
                         this.chart = TInterop.ExecuteJavaScriptBase(@"new ej.charts.Chart({
                             background : 'rgba(0, 0, 0, 0.0)',
                             enableCanvas: false,
                             width:'100%',
-                            heigth:'100%',
-                            rows:[
-                                    {heigth:'50%'},
-                                    {heigth:'50%'}
-                                 ],
+                            height:'100%',
+                            rows: $0,
                             legendSettings:{ visible:false },
-                    })");
+                        })", rowsArray);
 
                         if (this.orientationMode != OrientationMode.Horizontal)
                             this.primaryXAxis.LabelFormat = this.primaryXAxis.LabelFormat.Replace(" ", " <br> ");
@@ -3218,15 +3278,22 @@ namespace T.Wpf.Components.TrendChart
                 {
                     object chartAxes = TInterop.ExecuteJavaScriptBase(@"[]");
                     object objAxes;
-                    int idx = 1;
+                    int idx = this.isStackPensMode ? 0 : 1;
                     if (this.listOfChartAxes != null && this.listOfChartAxes.Count > 0)
                     {
                         foreach (TAxis axes in this.listOfChartAxes)
                         {
-                            string aux = idx.ToString(TCultureInfo.InvariantCulture);
-                            object seriesFillColor = TInterop.ExecuteJavaScriptBase("$0.series[Number($1)].fill", this.chart, aux);
-                            axes.LabelStyleColor = seriesFillColor.ToString();
-                            objAxes = axes.CreateJsObject();
+                            int axisRowIndex = this.IsStackPensMode && axes.RowIndex != int.MinValue ? axes.RowIndex : idx;
+
+                            string aux = axisRowIndex.ToString(TCultureInfo.InvariantCulture);
+                            object serie = TInterop.ExecuteJavaScriptBase("$0.series[Number($1)]", this.chart, aux);
+                            object seriesFillColor = null;
+                            if (serie != null)
+                                seriesFillColor = TInterop.ExecuteJavaScriptBase("$0.fill", serie);
+                            if (seriesFillColor != null)
+                                axes.LabelStyleColor = seriesFillColor.ToString();
+
+                            objAxes = this.IsStackPensMode ? axes.CreateJsObject(axisRowIndex) : axes.CreateJsObject();
                             TInterop.ExecuteJavaScriptBase("$0.push($1)", chartAxes, objAxes);
                             idx++;
                         }
@@ -3296,7 +3363,16 @@ namespace T.Wpf.Components.TrendChart
                     TInterop.ExecuteJavaScriptBase("$0.primaryXAxis = $1", this.chart, xAxis);
 
                     // Primary Y Axis
-                    object yAxis = this.primaryYAxis.CreateJsObject();
+                    object yAxis;
+                    if (this.isStackPensMode)
+                    {
+                        yAxis = this.primaryYAxis.CreateJsObject();
+                        TInterop.ExecuteJavaScriptBase("$0.visible = false", yAxis);
+                    }
+                    else
+                    {
+                        yAxis = this.primaryYAxis.CreateJsObject();
+                    }
                     TInterop.ExecuteJavaScriptBase("$0.primaryYAxis = $1", this.chart, yAxis);
                 }
                 catch (Exception ex)
@@ -3360,6 +3436,8 @@ namespace T.Wpf.Components.TrendChart
             this.axisLimitChanged = false;
             this.listOfChartAxes.Clear();
             this.listOfChartSeries.Clear();
+
+            this.previousIsStackPensMode = this.isStackPensMode;
 
             this.initializationLoops += 1;
           
@@ -5131,7 +5209,17 @@ namespace T.Wpf.Components.TrendChart
                 bool shouldReturnAllScales = true;
                 bool shouldApplyUnitsConversion = false;
                 List<object[]> penScales = this.GetPensYScale(shouldReturnAllScales, shouldApplyUnitsConversion);
+
+                // Count total visible pens once
+                int totalVisiblePens = 0;
+                foreach (LineGraph p in this.pens)
+                {
+                    if (p.Visibility == Visibility.Visible)
+                        totalVisiblePens++;
+                }
+
                 int idx = 0;
+                int visiblePenIdx = 0; // Track visible pens for RowIndex calculation
                 foreach (LineGraph pen in this.pens)
                 {
                     double yAxisMin = pen.MinValue;
@@ -5165,10 +5253,19 @@ namespace T.Wpf.Components.TrendChart
                     }
 
                     this.UpdateSeries(pen, yAxisMin, yAxisMax, idx, stroke);
-                    if (idx > 0)
-                        this.UpdateGridAxes(pen, yAxisMin, yAxisMax, idx);
+
+                    if (idx > 0 || this.isStackPensMode)
+                    {
+                        // Only pass visiblePenIdx for visible pens
+                        int currentVisibleIdx = pen.Visibility == Visibility.Visible ? visiblePenIdx : -1;
+                        this.UpdateGridAxes(pen, yAxisMin, yAxisMax, idx, currentVisibleIdx, totalVisiblePens);
+                    }
 
                     idx++;
+
+                    // Only increment visiblePenIdx for visible pens
+                    if (pen.Visibility == Visibility.Visible)
+                        visiblePenIdx++;
                 }
 
                 this.UpdateCursors();
@@ -5243,6 +5340,14 @@ namespace T.Wpf.Components.TrendChart
             this.UpdateGridLines();
             
             this.UpdateLabels();
+
+            // In StackPens mode with individual Y scales, we need to recalculate panels
+            // after labels are created to get the correct YAxis.Width
+            //if (this.isStackPensMode && this.isEnabledYScaleForEachPen)
+            //{
+            //    this.UpdatePanels();
+            //    this.UpdateLabels(); // Update labels again with correct YAxis.Width
+            //}
 
         }
 
@@ -5780,7 +5885,7 @@ namespace T.Wpf.Components.TrendChart
 
                 TSeries series = new TSeries(_chartData, chartType, "x", "y", penLabelOutput, marker);
 
-                if (idx > 0)
+                if (idx > 0 || this.isStackPensMode)
                     series.YAxisName = $"yAxis{idx}";
                 series.Visible = penVisible;
               
@@ -5867,7 +5972,7 @@ namespace T.Wpf.Components.TrendChart
             }
         }
 
-        private void UpdateGridAxes(LineGraph pen, double penScaleMin, double penScaleMax, int idx)
+        private void UpdateGridAxes(LineGraph pen, double penScaleMin, double penScaleMax, int idx, int visiblePenIdx, int totalVisiblePens)
         {
             try
             {
@@ -5883,6 +5988,23 @@ namespace T.Wpf.Components.TrendChart
                 axis.ZoomPosition = this.primaryYAxis.ZoomPosition;
                 axis.IsInversed = this.primaryYAxis.IsInversed;
                 axis.IsVisible = false;
+
+                if (this.isStackPensMode)
+                {
+                    // Only set RowIndex for visible pens
+                    if (visiblePenIdx >= 0)
+                    {
+                        // We need to invert the index so that the first visible pen appears at the top
+                        // Use visiblePenIdx instead of idx to calculate RowIndex based only on visible pens
+                        int invertedIdx = (totalVisiblePens - 1) - visiblePenIdx;
+                        axis.RowIndex = invertedIdx;
+                    }
+                    else
+                    {
+                        // For hidden pens, set an invalid RowIndex
+                        axis.RowIndex = int.MinValue;
+                    }
+                }
 
                 this.listOfChartAxes.Add(axis);
             }
@@ -5936,8 +6058,16 @@ namespace T.Wpf.Components.TrendChart
                 bool legendExists = this.LegendPlacement != Base.eLegendPlacement.None;
                 if (legendExists && this.pens.Count > 0)
                 {
+                    if (this.legendLabels == null)
+                        return;
+                    if (this.legendLines == null)
+                        return;
+
                     for (int i = 0; i < this.pens.Count; i++)
                     {
+                        if (i >= this.legendLabels.Length || i >= this.legendLines.Length)
+                            continue;
+
                         double height = this.GetTextBlockActualHeight(this.legendLabels[i]);
                         if (legendIsInBottomPanel)
                         {
@@ -5965,8 +6095,14 @@ namespace T.Wpf.Components.TrendChart
                 double xAxisWidth = 0;
                 if (this.numOfLabelsX > 0 && this.disableOutputLabels == false)
                 {
+                    if (this.xLabels == null)
+                        return;
+
                     for (int i = 0; i < this.numOfLabelsX; i++)
                     {
+                        if (i >= this.xLabels.Length)
+                            break;
+
                         double height = this.GetTextBlockActualHeight(this.xLabels[i]);
                         if (xAxisHeight < height)
                             xAxisHeight = height;
@@ -5983,41 +6119,112 @@ namespace T.Wpf.Components.TrendChart
                 {
                     if (this.isEnabledYScaleForEachPen)
                     {
-                        for (int i = 0; i < this.numOfLabelsY; i++)
+                        if (this.isStackPensMode)
                         {
-                            for (int j = 0; j < 3; j++)
+                            if (this.yLabels == null)
+                                return;
+
+                            const double MIN_Y_AXIS_WIDTH = 20.0;
+                            yAxisWidth = MIN_Y_AXIS_WIDTH;
+
+                            for (int i = 0; i < this.yLabels.Length; i++)
                             {
-                                double yAxisHeightGroup = 0;
-                                double yAxisWidthGroup = 0;
-                                foreach (YLabelGroup group in this.yLabelsGroup)
+                                if (this.yLabels[i] == null)
+                                    continue;
+
+                                double actualWidth = this.GetTextBlockActualWidth(this.yLabels[i]);
+                                if (yAxisWidth < actualWidth)
+                                    yAxisWidth = actualWidth;
+
+                                double actualHeight = this.yLabels[i].ActualHeight;
+                                if (yAxisHeight < actualHeight)
+                                    yAxisHeight = actualHeight;
+                            }
+                        }
+                        else
+                        {
+                            if (this.yLabelsGroup == null)
+                                return;
+
+                            for (int i = 0; i < this.numOfLabelsY; i++)
+                            {
+                                for (int j = 0; j < 3; j++)
                                 {
-                                    if (group.Pens[j][i] != null)
+                                    double yAxisHeightGroup = 0;
+                                    double yAxisWidthGroup = 0;
+
+                                    int groupIndex = 0;
+                                    foreach (YLabelGroup group in this.yLabelsGroup)
                                     {
-                                        double actualWidth = group.PensWidth[j][i];
-                                        yAxisWidthGroup += actualWidth;
-                                        if (group.GroupWidth < actualWidth)
-                                            group.GroupWidth = actualWidth;
+                                        if (group.Pens == null || j >= group.Pens.Length)
+                                        {
+                                            groupIndex++;
+                                            continue;
+                                        }
 
-                                        double actualHeight = group.PensHeight[j][i];
-                                        if (yAxisHeightGroup < actualHeight)
-                                            yAxisHeightGroup = actualHeight;
+                                        if (group.Pens[j] == null)
+                                        {
+                                            groupIndex++;
+                                            continue;
+                                        }
 
-                                        if (group.GroupHeight < actualHeight)
-                                            group.GroupHeight = actualHeight;
+                                        if (i >= group.Pens[j].Length)
+                                        {
+                                            groupIndex++;
+                                            continue;
+                                        }
+
+                                        if (group.Pens[j][i] != null)
+                                        {
+                                            if (group.PensWidth == null || j >= group.PensWidth.Length || i >= group.PensWidth[j].Length)
+                                            {
+                                                groupIndex++;
+                                                continue;
+                                            }
+                                            if (group.PensHeight == null || j >= group.PensHeight.Length || i >= group.PensHeight[j].Length)
+                                            {
+                                                groupIndex++;
+                                                continue;
+                                            }
+
+                                            double actualWidth = group.PensWidth[j][i];
+                                            yAxisWidthGroup += actualWidth;
+                                            if (group.GroupWidth < actualWidth)
+                                                group.GroupWidth = actualWidth;
+
+                                            double actualHeight = group.PensHeight[j][i];
+                                            if (yAxisHeightGroup < actualHeight)
+                                                yAxisHeightGroup = actualHeight;
+
+                                            if (group.GroupHeight < actualHeight)
+                                                group.GroupHeight = actualHeight;
+                                        }
+                                        groupIndex++;
                                     }
-                                }
-                                if (yAxisWidth < (yAxisWidthGroup + 4 * (this.yLabelsGroup.Count - 1)))
-                                    yAxisWidth = (yAxisWidthGroup + 4 * (this.yLabelsGroup.Count - 1));
+                                    if (yAxisWidth < (yAxisWidthGroup + 4 * (this.yLabelsGroup.Count - 1)))
+                                        yAxisWidth = (yAxisWidthGroup + 4 * (this.yLabelsGroup.Count - 1));
 
-                                if (yAxisHeight < (yAxisHeightGroup + 4 + (this.yLabelsGroup.Count - 1)))
-                                    yAxisHeight = (yAxisHeightGroup + 4 + (this.yLabelsGroup.Count - 1));
+                                    if (yAxisHeight < (yAxisHeightGroup + 4 + (this.yLabelsGroup.Count - 1)))
+                                        yAxisHeight = (yAxisHeightGroup + 4 + (this.yLabelsGroup.Count - 1));
+                                }
                             }
                         }
                     }
                     else
                     {
-                        for (int i = 0; i < this.numOfLabelsY; i++)
+                        if (this.yLabels == null)
+                            return;
+
+                        int labelsToCheck = this.isStackPensMode ? this.yLabels.Length : this.numOfLabelsY;
+
+                        for (int i = 0; i < labelsToCheck; i++)
                         {
+                            if (i >= this.yLabels.Length)
+                                break;
+
+                            if (this.yLabels[i] == null)
+                                continue;
+
                             double actualWidth = this.GetTextBlockActualWidth(this.yLabels[i]);
                             if (yAxisWidth < actualWidth)
                                 yAxisWidth = actualWidth;
@@ -6090,7 +6297,6 @@ namespace T.Wpf.Components.TrendChart
 
                     double correctedMargin = this.YAxis.Width - chartBorderOffset;
 
-                    // adjust end element to be aligned with end of chart
                     if (legendIsInRightPanel)
                     {
                         this.LegendWindowBorder.Margin = new Thickness(this.RenderedWidth - this.LegendWindow.Width - TICK_SIZE, this.ChartArea.Y, 0, 0);
@@ -6112,17 +6318,49 @@ namespace T.Wpf.Components.TrendChart
                     // When is vertical mode, all non null pens from group will be lined up vertically.
                     if (this.IsEnabledYScaleForEachPen)
                     {
+                        if (this.yLabelsGroup == null)
+                            return;
+
                         for (int i = 0; i < this.numOfLabelsY; i++)
                         {
                             for (int j = 0; j < 3; j++)
                             {
+                                int groupIndex = 0;
                                 foreach (YLabelGroup group in this.yLabelsGroup)
                                 {
-                                    if (group.Pens[j][i] == null)
+                                    if (group.Pens == null || j >= group.Pens.Length)
+                                    {
+                                        groupIndex++;
                                         continue;
+                                    }
+
+                                    if (group.Pens[j] == null)
+                                    {
+                                        groupIndex++;
+                                        continue;
+                                    }
+
+                                    if (i >= group.Pens[j].Length)
+                                    {
+                                        groupIndex++;
+                                        continue;
+                                    }
+
+                                    if (group.Pens[j][i] == null)
+                                    {
+                                        groupIndex++;
+                                        continue;
+                                    }
+
+                                    if (group.PensHeight == null || j >= group.PensHeight.Length || i >= group.PensHeight[j].Length)
+                                    {
+                                        groupIndex++;
+                                        continue;
+                                    }
 
                                     double actualHeight = group.PensHeight[j][i];
                                     yAxisHeight += actualHeight;
+                                    groupIndex++;
                                 }
                             }
                         }
@@ -6130,8 +6368,14 @@ namespace T.Wpf.Components.TrendChart
                     }
                     else
                     {
+                        if (this.yLabels == null)
+                            return;
+
                         for (int i = 0; i < this.numOfLabelsY; i++)
                         {
+                            if (i >= this.yLabels.Length)
+                                break;
+
                             double actualHeight = this.GetTextBlockActualHeight(this.yLabels[i]);
                             yAxisHeight += actualHeight;
                         }
@@ -6615,6 +6859,12 @@ namespace T.Wpf.Components.TrendChart
                 if (this.disableOutputLabels)
                     return;
 
+                if (this.isStackPensMode && this.pens.Count > 0)
+                {
+                    this.UpdateYLabelsStackPensMode();
+                    return;
+                }
+
                 double piece = this.numOfLabelsY == 1 ? 0.0 : this.YAxis.Height / (this.numOfLabelsY - 1);
                 //if (this.orientationMode != OrientationMode.Horizontal)
                 //    piece = this.numOfLabelsY == 1 ? 0.0 : this.YAxis.Width / (this.numOfLabelsY - 1);
@@ -6799,6 +7049,144 @@ namespace T.Wpf.Components.TrendChart
             catch (Exception ex)
             {
                 Console.WriteLine($"UpdateYLabels Exception :: {ex.Message} || {ex.StackTrace}");
+            }
+        }
+
+        private void UpdateYLabelsStackPensMode()
+        {
+            try
+            {
+                int visiblePensCount = 0;
+                foreach (var pen in this.pens)
+                {
+                    if (pen.Visibility == Visibility.Visible)
+                        visiblePensCount++;
+                }
+
+                if (visiblePensCount == 0)
+                    return;
+
+                double rowHeight = this.YAxis.Height / visiblePensCount;
+
+                if (this.isEnabledYScaleForEachPen)
+                {
+                    bool shouldReturnAllScales = false;
+                    bool shouldApplyUnitsConversion = true;
+                    List<object[]> penYScales = this.GetPensYScale(shouldReturnAllScales, shouldApplyUnitsConversion);
+
+                    int visiblePenIndex = 0;
+                    int penScaleIndex = 0;
+
+                    // Iterate through all pens to find visible ones
+                    for (int p = 0; p < this.pens.Count; p++)
+                    {
+                        if (this.pens[p].Visibility != Visibility.Visible)
+                            continue;
+
+                        if (penScaleIndex >= penYScales.Count)
+                            break;
+
+                        int offset = p * this.numOfLabelsY;
+
+                        double rowBaseY = visiblePenIndex * rowHeight;
+
+                        double piece = this.numOfLabelsY == 1 ? 0.0 : rowHeight / (this.numOfLabelsY - 1);
+
+                        int nullCount = 0;
+                        int processedCount = 0;
+
+                        for (int i = this.numOfLabelsY - 1; i >= 0; i--)
+                        {
+                            if (this.yLabels[offset + i] == null)
+                            {
+                                nullCount++;
+                                continue;
+                            }
+
+                            processedCount++;
+
+                            int k = (this.numOfLabelsY - 1) - i;
+                            double labelValue = i * piece;
+
+                            double y;
+                            double textHeight = 0;
+                            if (i == this.numOfLabelsY - 1) // Top label
+                            {
+                                textHeight = this.GetTextBlockActualHeight(this.yLabels[offset + k]);
+                                y = rowBaseY + rowHeight - textHeight;
+                            }
+                            else if (i == 0) // Bottom label
+                                y = rowBaseY;
+                            else // Middle labels
+                            {
+                                this.yLabels[offset + k].Text = "";
+                                textHeight = this.GetTextBlockActualHeight(this.yLabels[offset + k]) / 2;
+                                y = rowBaseY + rowHeight - labelValue - textHeight;
+                            }
+
+                            double textWidth = this.GetTextBlockActualWidth(this.yLabels[offset + k]);
+                            double x = this.YAxis.Width - (TICK_SIZE + 2) - textWidth;
+
+                            this.yLabels[offset + k].SetLocation(x, y);
+                        }
+
+                        visiblePenIndex++;
+                        penScaleIndex++;
+                    }
+                }
+                else
+                {
+                    int visiblePenIndex = 0;
+
+                    for (int p = 0; p < this.pens.Count; p++)
+                    {
+                        if (this.pens[p].Visibility != Visibility.Visible)
+                            continue;
+
+                        double rowBaseY = visiblePenIndex * rowHeight;
+
+                        double piece = this.numOfLabelsY == 1 ? 0.0 : rowHeight / (this.numOfLabelsY - 1);
+
+                        int offset = p * this.numOfLabelsY;
+
+                        for (int i = this.numOfLabelsY - 1; i >= 0; i--)
+                        {
+
+                            if (this.yLabels[offset + i] == null)
+                                continue;
+
+                            int k = (this.numOfLabelsY - 1) - i;
+                            double labelValue = i * piece;
+
+                            double y;
+                            if (i == this.numOfLabelsY - 1) // Top label
+                            {
+                                double textHeight = this.GetTextBlockActualHeight(this.yLabels[offset + k]);
+                                y = rowBaseY + rowHeight - textHeight;
+                            }
+                            else if (i == 0) // Bottom label
+                            {
+                                y = rowBaseY;
+                            }
+                            else // Middle labels
+                            {
+                                this.yLabels[offset + k].Text = "";
+                                double textHeight = this.GetTextBlockActualHeight(this.yLabels[offset + k]) / 2;
+                                y = rowBaseY + rowHeight - labelValue - textHeight;
+                            }
+
+                            double x = this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[offset + k]);
+
+                            this.yLabels[offset + k].SetLocation(x, y);
+                        }
+
+                        visiblePenIndex++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"UpdateYLabelsStackPensMode Exception :: {ex.Message} || {ex.StackTrace}");
             }
         }
 
@@ -7204,6 +7592,12 @@ namespace T.Wpf.Components.TrendChart
                 if (this.disableOutputLabels)
                     return;
 
+                if (this.isStackPensMode && this.pens.Count > 0)
+                {
+                    this.CreateYLabels_StackPensMode();
+                    return;
+                }
+
                 if (this.IsEnabledYScaleForEachPen)
                 {
                     this.CreateYLabels_EnabledYScaleForEachPen();
@@ -7359,7 +7753,7 @@ namespace T.Wpf.Components.TrendChart
 
             if (!reset)
             {
-                for (int i = 1; i < penYScales.Count; i++)
+                for (int i = 0; i < penYScales.Count; i++)
                 {
                     Brush nowStroke = penYScales[i][0] as Brush;
                     double nowYMin = TConvert.ToDouble(penYScales[i][1]);
@@ -7379,6 +7773,27 @@ namespace T.Wpf.Components.TrendChart
 
             if (reset)
             {
+                // Remove explicitly old labels before clearing yLabelsGroup to prevent orphaned labels
+                foreach (YLabelGroup oldGroup in this.yLabelsGroup)
+                {
+                    if (oldGroup.Pens != null)
+                    {
+                        for (int j = 0; j < oldGroup.Pens.Length; j++)
+                        {
+                            if (oldGroup.Pens[j] != null)
+                            {
+                                for (int k = 0; k < oldGroup.Pens[j].Length; k++)
+                                {
+                                    if (oldGroup.Pens[j][k] != null && this.YAxis.Children.Contains(oldGroup.Pens[j][k]))
+                                    {
+                                        this.YAxis.Children.Remove(oldGroup.Pens[j][k]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 this.lastPenYScales = penYScales;
 
                 this.yLabelsGroup.Clear();
@@ -7506,6 +7921,210 @@ namespace T.Wpf.Components.TrendChart
                 {
                     groupIndex = 0;
                     group++;
+                }
+            }
+        }
+
+        private void CreateYLabels_StackPensMode()
+        {
+            if (this.yLabels != null && this.yLabels.Length != (this.numOfLabelsY * this.pens.Count))
+            {
+                foreach (FrameworkElement el in this.yLabels)
+                    this.YAxis.Children.Remove(el);
+                this.yLabels = null;
+            }
+
+            if (this.pens.Count == 0)
+                return;
+
+            if (this.yLabels == null)
+            {
+                this.yLabels = new TextBlock[this.numOfLabelsY * this.pens.Count];
+                for (int i = 0; i < (this.numOfLabelsY * this.pens.Count); i++)
+                    this.yLabels[i] = null;
+            }
+            bool shouldReturnAllScales = false;
+            bool shouldApplyUnitsConversion = true;
+            List<object[]> penYScales = this.GetPensYScale(shouldReturnAllScales, shouldApplyUnitsConversion);
+
+            if (this.isEnabledYScaleForEachPen)
+            {
+                // First, hide all labels
+                for (int i = 0; i < this.yLabels.Length; i++)
+                {
+                    if (this.yLabels[i] != null)
+                        this.yLabels[i].Visibility = Visibility.Collapsed;
+                }
+
+                int penScaleIndex = 0;
+
+                // Iterate through all pens to find visible ones
+                for (int p = 0; p < this.pens.Count; p++)
+                {
+                    if (this.pens[p].Visibility != Visibility.Visible)
+                        continue;
+
+                    if (penScaleIndex >= penYScales.Count)
+                        break;
+
+                    int offset = p * this.numOfLabelsY;
+
+                    Brush stroke = penYScales[penScaleIndex][0] as Brush;
+                    double _yMin = TConvert.ToDouble(penYScales[penScaleIndex][1]);
+                    double _yMax = TConvert.ToDouble(penYScales[penScaleIndex][2]);
+
+                    bool isAutoEnabled = false;
+                    if (this.typeChart == TypeChart.TrendChart)
+                        isAutoEnabled = (this.pens[p].TrendPen as TrendPen).Auto;
+                    else
+                        isAutoEnabled = (this.pens[p].TrendPen as TrendPen).Auto;
+
+                    if (isAutoEnabled)
+                    {
+                        _yMin = this.pens[p].MinValue;
+                        _yMax = this.pens[p].MaxValue;
+                    }
+
+                    if (this.IsXYChart)
+                    {
+                        _yMin = this.YMin;
+                        _yMax = this.YMax;
+                    }
+
+                    double piece = this.numOfLabelsY == 1 ? 0.0 : (_yMax - _yMin) / (this.numOfLabelsY - 1);
+
+                    int createdCount = 0;
+
+                    for (int i = this.numOfLabelsY - 1; i >= 0; i--)
+                    {
+                        double value;
+                        if (i > 0 && i == this.numOfLabelsY - 1)
+                            value = _yMax;
+                        else
+                            value = _yMin + (i * piece);
+
+                        if (this.yLabels[offset + i] == null)
+                        {
+                            this.yLabels[offset + i] = new TextBlock() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, FontFamily = new FontFamily("Arial"), FontSize = 10, IsHitTestVisible = false };
+                            createdCount++;
+                        }
+
+                        this.yLabels[offset + i].Margin = new Thickness(0);
+
+                        if (this.YLabelsEditable && (value == _yMax || value == _yMin))
+                        {
+                            bool isMin = value == _yMin;
+
+                            this.yLabels[offset + i].IsHitTestVisible = true;
+                            this.yLabels[offset + i].MouseLeftButtonDown += this.YAxisLabelEditable_PointerPressed;
+                            this.yLabels[offset + i].MouseMove += this.YAxisLabelEditable_PointerMoved;
+                            this.yLabels[offset + i].Tag = new object[] { isMin, this.pens[p] };
+                        }
+
+                        string lastValue = this.yLabels[offset + i].Text;
+                        string nextValue = this.GetStringYAxis(i, value);
+
+                        bool isEqual = lastValue != null && string.Compare(lastValue, nextValue, true) == 0;
+                        if (isEqual == false)
+                            this.yLabels[offset + i].Text = nextValue;
+
+                        this.yLabels[offset + i].Foreground = stroke;
+
+                        if (!this.YAxis.Children.Contains(this.yLabels[offset + i]))
+                            this.YAxis.Children.Add(this.yLabels[offset + i]);
+
+                        this.yLabels[offset + i].SetLocation(0, 0);
+                    }
+
+                    for (int i = 0; i < this.numOfLabelsY; i++)
+                    {
+                        if (this.yLabels[offset + i] != null)
+                        {
+                            this.yLabels[offset + i].Visibility = Visibility.Visible;
+                            this.yLabels[offset + i].Opacity = 1.0;
+                        }
+
+                        for (int j = 0; j < this.SubYDivisions; j++)
+                        {
+                            i++;
+                            if (i >= this.numOfLabelsY)
+                                break;
+                            if (this.yLabels[offset + i] != null)
+                            {
+                                this.yLabels[offset + i].Visibility = Visibility.Visible;
+                                this.yLabels[offset + i].Opacity = this.DisableOutputSubYDivisions ? 0.0 : 0.3;
+                            }
+                        }
+                    }
+
+                    penScaleIndex++;
+                }
+            }
+            else
+            {
+                double piece = this.numOfLabelsY == 1 ? 0.0 : (this.yMax - this.yMin) / (this.numOfLabelsY - 1);
+
+                for (int p = 0; p < this.pens.Count; p++)
+                {
+                    if (this.pens[p].Visibility != Visibility.Visible)
+                        continue;
+
+                    int offset = p * this.numOfLabelsY;
+
+                    // Find the index in penYScales for this visible pen
+                    int penScaleIndex = 0;
+                    for (int j = 0; j < p; j++)
+                    {
+                        if (this.pens[j].Visibility == Visibility.Visible)
+                            penScaleIndex++;
+                    }
+
+                    if (penScaleIndex >= penYScales.Count)
+                        continue;
+
+                    Brush stroke = penYScales[penScaleIndex][0] as Brush;
+
+                    for (int i = this.numOfLabelsY - 1; i >= 0; i--)
+                    {
+                        double value;
+                        if (i > 0 && i == this.numOfLabelsY - 1)
+                            value = this.yMax;
+                        else
+                            value = this.yMin + (i * piece);
+
+                        if (this.yLabels[offset + i] == null)
+                            this.yLabels[offset + i] = new TextBlock() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, FontFamily = new FontFamily("Arial"), FontSize = 10, IsHitTestVisible = false };
+
+                        this.yLabels[offset + i].Margin = new Thickness(0);
+
+                        if (this.YLabelsEditable && (i == 0 || i == this.numOfLabelsY - 1))
+                        {
+                            this.yLabels[offset + i].IsHitTestVisible = true;
+                            this.yLabels[offset + i].MouseLeftButtonDown += this.YAxisLabelEditable_PointerPressed;
+                            this.yLabels[offset + i].MouseMove += this.YAxisLabelEditable_PointerMoved;
+                            this.yLabels[offset + i].Tag = new object[] { i == 0, this.pens[p] };
+                        }
+
+                        this.yLabels[offset + i].Text = this.GetStringYAxis(i, value);
+                            this.yLabels[offset + i].Foreground = stroke;
+
+                        if (!this.YAxis.Children.Contains(this.yLabels[offset + i]))
+                            this.YAxis.Children.Add(this.yLabels[offset + i]);
+
+                        this.yLabels[offset + i].SetLocation(0, 0);
+                    }
+
+                    for (int i = 0; i < this.numOfLabelsY; i++)
+                    {
+                        this.yLabels[offset + i].Opacity = 1.0;
+                        for (int j = 0; j < this.SubYDivisions; j++)
+                        {
+                            i++;
+                            if (i >= this.numOfLabelsY)
+                                break;
+                            this.yLabels[offset + i].Opacity = this.DisableOutputSubYDivisions ? 0.0 : 0.3;
+                        }
+                    }
                 }
             }
         }
