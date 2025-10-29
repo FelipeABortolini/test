@@ -7874,7 +7874,7 @@ namespace T.Wpf.Components.TrendChart
                 if (this.yLabels[i] == null)
                     this.yLabels[i] = new TextBlock() { /*Background = Brushes.Transparent, BorderBrush = Brushes.Transparent,*/ HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, FontFamily = new FontFamily("Arial"), FontSize = 10, IsHitTestVisible = false };
 
-                if (this.YLabelsEditable && (i == 0 || i == this.numOfLabelsY - 1))
+                if (this.YLabelsEditable && !this.isStackPensMode && (i == 0 || i == this.numOfLabelsY - 1))
                 {
                     this.yLabels[i].IsHitTestVisible = true;
                     this.yLabels[i].MouseLeftButtonDown += this.YAxisLabelEditable_PointerPressed;
@@ -8059,7 +8059,7 @@ namespace T.Wpf.Components.TrendChart
 
                     this.yLabels[offset + i].Margin = new Thickness(0);
 
-                    if (this.YLabelsEditable && (value == _yMax || value == _yMin))
+                    if (this.YLabelsEditable && !this.isStackPensMode && (value == _yMax || value == _yMin))
                     {
                         bool isMin = value == _yMin;
 
@@ -8193,7 +8193,7 @@ namespace T.Wpf.Components.TrendChart
 
                         this.yLabels[offset + i].Margin = new Thickness(0);
 
-                        if (this.YLabelsEditable && (value == _yMax || value == _yMin))
+                        if (this.YLabelsEditable && !this.isStackPensMode && (value == _yMax || value == _yMin))
                         {
                             bool isMin = value == _yMin;
 
@@ -8278,7 +8278,7 @@ namespace T.Wpf.Components.TrendChart
 
                         this.yLabels[offset + i].Margin = new Thickness(0);
 
-                        if (this.YLabelsEditable && (i == 0 || i == this.numOfLabelsY - 1))
+                        if (this.YLabelsEditable && !this.isStackPensMode && (i == 0 || i == this.numOfLabelsY - 1))
                         {
                             this.yLabels[offset + i].IsHitTestVisible = true;
                             this.yLabels[offset + i].MouseLeftButtonDown += this.YAxisLabelEditable_PointerPressed;
