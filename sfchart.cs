@@ -8291,11 +8291,19 @@ namespace T.Wpf.Components.TrendChart
             {
                 double piece = this.numOfLabelsY == 1 ? 0.0 : (this.yMax - this.yMin) / (this.numOfLabelsY - 1);
 
+                int visiblePenCount = 0;
+                for (int j = 0; j < this.pens.Count; j++)
+                {
+                    if (this.pens[j].Visibility == Visibility.Visible)
+                        visiblePenCount++;
+                }
+
+                Brush defaultStroke = this.LabelsBrush;
+                if (visiblePenCount > 0 && penYScales.Count > 0)
+                    defaultStroke = penYScales[0][0] as Brush;
+
                 for (int p = 0; p < this.pens.Count; p++)
                 {
-                    if (this.pens[p].Visibility != Visibility.Visible)
-                        continue;
-
                     int offset = p * this.numOfLabelsY;
 
                     int penScaleIndex = 0;
@@ -8305,10 +8313,9 @@ namespace T.Wpf.Components.TrendChart
                             penScaleIndex++;
                     }
 
-                    if (penScaleIndex >= penYScales.Count)
-                        continue;
-
-                    Brush stroke = penYScales[penScaleIndex][0] as Brush;
+                    Brush stroke = defaultStroke;
+                    if (this.pens[p].Visibility == Visibility.Visible && penScaleIndex < penYScales.Count)
+                        stroke = penYScales[penScaleIndex][0] as Brush;
 
                     for (int i = this.numOfLabelsY - 1; i >= 0; i--)
                     {
@@ -8338,17 +8345,29 @@ namespace T.Wpf.Components.TrendChart
                             this.YAxis.Children.Add(this.yLabels[offset + i]);
 
                         this.yLabels[offset + i].SetLocation(0, 0);
+
+                        if (this.pens[p].Visibility == Visibility.Visible)
+                            this.yLabels[offset + i].Visibility = Visibility.Visible;
+                        else
+                            this.yLabels[offset + i].Visibility = Visibility.Collapsed;
                     }
 
                     for (int i = 0; i < this.numOfLabelsY; i++)
                     {
-                        this.yLabels[offset + i].Opacity = 1.0;
-                        for (int j = 0; j < this.SubYDivisions; j++)
+                        if (this.yLabels[offset + i] != null)
                         {
-                            i++;
-                            if (i >= this.numOfLabelsY)
-                                break;
-                            this.yLabels[offset + i].Opacity = this.DisableOutputSubYDivisions ? 0.0 : 0.3;
+                            if (this.pens[p].Visibility == Visibility.Visible)
+                            {
+                                this.yLabels[offset + i].Opacity = 1.0;
+                                for (int j = 0; j < this.SubYDivisions; j++)
+                                {
+                                    i++;
+                                    if (i >= this.numOfLabelsY)
+                                        break;
+                                    if (this.yLabels[offset + i] != null)
+                                        this.yLabels[offset + i].Opacity = this.DisableOutputSubYDivisions ? 0.0 : 0.3;
+                                }
+                            }
                         }
                     }
                 }
