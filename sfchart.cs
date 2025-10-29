@@ -5475,6 +5475,29 @@ namespace T.Wpf.Components.TrendChart
                     this.yGridLines[i].Y1 = y1;
                     this.yGridLines[i].X2 = x2;
                     this.yGridLines[i].Y2 = y2;
+                    
+                    if (this.isStackPensMode && this.SubYDivisions > 0)
+                    {
+                        int visiblePensCount = this.pens.Count(p => p.Visibility == Visibility.Visible);
+                        
+                        if (visiblePensCount > 0)
+                        {
+                            int labelsPerPen = this.numOfLabelsY / visiblePensCount;
+                            
+                            bool isMainDivision = (i % labelsPerPen == 0);
+                            
+                            if (!isMainDivision)
+                                this.yGridLines[i].Opacity = 0.25;
+                            else
+                                this.yGridLines[i].Opacity = 1.0;
+                        }
+                        else
+                            this.yGridLines[i].Opacity = 1.0;
+                    }
+                    else
+                    {
+                        this.yGridLines[i].Opacity = 1.0;
+                    }
                 }
 
                 piece = this.numOfLabelsX == 1 ? 0.0 : this.XAxis.Width / (this.numOfLabelsX - 1);
@@ -7833,6 +7856,28 @@ namespace T.Wpf.Components.TrendChart
                     this.yGridLines[i] = new Line() { IsHitTestVisible = false, Width = this.ChartArea.Width, Height = this.ChartArea.Height, Tag = "YGridLines" };
                 this.yGridLines[i].Stroke = this.GridLinesBrush;
                 this.SetLineStroke(this.yGridLines[i], this.gridLinesStroke);
+                
+                if (this.isStackPensMode && this.SubYDivisions > 0)
+                {
+                    int visiblePensCount = this.pens.Count(p => p.Visibility == Visibility.Visible);
+                    
+                    if (visiblePensCount > 0)
+                    {
+                        int labelsPerPen = this.numOfLabelsY / visiblePensCount;
+                        bool isMainDivision = (i % labelsPerPen == 0);
+                        
+                        if (!isMainDivision)
+                            this.yGridLines[i].Opacity = 0.25;
+                        else
+                            this.yGridLines[i].Opacity = 1.0;
+                    }
+                    else
+                        this.yGridLines[i].Opacity = 1.0;
+                }
+                else
+                {
+                    this.yGridLines[i].Opacity = 1.0;
+                }
 
                 if (this.Children.Contains(this.yGridLines[i]) == false)
                     this.Children.Add(this.yGridLines[i]);
