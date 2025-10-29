@@ -7112,18 +7112,49 @@ namespace T.Wpf.Components.TrendChart
                         double value = i * piece;
                         Point margin;
                         int j = (this.numOfLabelsY - 1) - i;
-                        if (i == this.numOfLabelsY - 1)
+                        
+                        if (this.orientationMode == OrientationMode.Horizontal)
                         {
-                            margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), this.YAxis.Height - this.GetTextBlockActualHeight(this.yLabels[j]));
+                            if (i == this.numOfLabelsY - 1)
+                            {
+                                margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), this.YAxis.Height - this.GetTextBlockActualHeight(this.yLabels[j]));
+                            }
+                            else if (i == 0)
+                            {
+                                margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), 0);
+                            }
+                            else
+                            {
+                                margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), value - this.GetTextBlockActualHeight(this.yLabels[j]) / 2);
+                            }
                         }
-                        else if (i == 0)
+                        else // Vertical orientation
                         {
-                            margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), 0);
+                            double pieceVertical = this.numOfLabelsY == 1 ? 0.0 : this.YAxis.Width / (this.numOfLabelsY - 1);
+                            double valueVertical = i * pieceVertical;
+                            double textWidth = this.GetTextBlockActualWidth(this.yLabels[j]);
+                            double textHeight = this.GetTextBlockActualHeight(this.yLabels[j]);
+                            
+                            if (i == this.numOfLabelsY - 1) // Min value
+                            {
+                                margin = new Point(0, 2);
+                            }
+                            else if (i == 0) // Max value
+                            {
+                                margin = new Point(this.YAxis.Width - textWidth, 2);
+                            }
+                            else // Middle values
+                            {
+                                this.yLabels[j].Text = "";
+                                margin = new Point(valueVertical - textWidth / 2, 2);
+                            }
+                            
+                            if (this.orientationMode == OrientationMode.VerticalBottomToTop)
+                            {
+                                margin.Y = this.YAxis.Height - textHeight - 2;
+                            }
                         }
-                        else
-                        {
-                            margin = new Point(this.YAxis.Width - (TICK_SIZE + 2) - this.GetTextBlockActualWidth(this.yLabels[j]), value - this.GetTextBlockActualHeight(this.yLabels[j]) / 2);
-                        }
+                        
                         this.yLabels[j].SetLocation(margin.X, margin.Y);
                     }
                 }
